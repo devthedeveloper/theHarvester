@@ -7,7 +7,7 @@ import secrets
 import string
 import sys
 import time
-from typing import Any
+from typing import Any, List
 
 import netaddr
 import ujson
@@ -58,6 +58,7 @@ from theHarvester.discovery.constants import MissingKey
 from theHarvester.lib import hostchecker, stash
 from theHarvester.lib.core import Core
 from theHarvester.screenshot.screenshot import ScreenShotter
+from theHarvester.config import CONCURRENT_TASKS
 
 
 async def start(rest_args: argparse.Namespace | None = None):
@@ -834,15 +835,22 @@ async def start(rest_args: argparse.Namespace | None = None):
             except Exception:
                 queue.task_done()
 
-    async def handler(lst):
-        tasks = [asyncio.create_task(store_method) for store_method in lst]
+    async def handler(lst: List[Any], concurrent_tasks: int):
+        semaphore = asyncio.Semaphore(concurrent_tasks)
+
+        async def sem_task(task):
+            async with semaphore:
+                return await task
+
+        tasks = [sem_task(store_method) for store_method in lst]
+
         for task in asyncio.as_completed(tasks):
             try:
                 await task
             except Exception as e:
                 print(f"An error occurred: {e}")
 
-    await handler(lst=stor_lst)
+    await handler(stor_lst, concurrent_tasks=CONCURRENT_TASKS)  # Adjust the number as needed
     return_ips: list = []
     if rest_args is not None and len(rest_filename) == 0 and rest_args.dns_brute is False:
         # Indicates user is using REST api but not wanting output to be saved to a file
